@@ -28,7 +28,7 @@ def home():
 def run():
     app.run(host='0.0.0.0', port=5000)
 
-Thread(target=run).start()
+Thread(target=run, daemon=True).start()
 
 # === HILFSFUNKTIONEN ===
 def get_next_week_dates():
@@ -49,15 +49,15 @@ async def delete_old_training_messages(channel):
 
 async def send_log(message: str):
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
-    if log_channel:
+    if log_channel and isinstance(log_channel, discord.TextChannel):
         await log_channel.send(f"📝 {message}")
     else:
         print(f"[LOG-FEHLER] {message}")
 
 async def create_training_posts():
     training_channel = bot.get_channel(TRAINING_CHANNEL_ID)
-    if training_channel is None:
-        await send_log("❌ Trainingskanal nicht gefunden!")
+    if not isinstance(training_channel, discord.TextChannel):
+        await send_log("❌ Trainingskanal nicht gefunden oder falscher Typ!")
         return
 
     guild = training_channel.guild
