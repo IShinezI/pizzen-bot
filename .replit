@@ -33,14 +33,18 @@ args = "Discord Bot"
 name = "Discord Bot"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python main.py"
-waitForPort = 8080
-
-[workflows.workflow.metadata]
-outputType = "console"
+waitForPort = 5000
 
 [[ports]]
 localPort = 8080
 externalPort = 8080
+
+[[ports]]
+localPort = 5000
+externalPort = 80
