@@ -11,6 +11,7 @@ TOKEN = os.environ['TOKEN']  # Token als Secret auf Replit speichern
 TRAINING_CHANNEL_ID = 1434580297206202482  # Channel für Abstimmungen
 LOG_CHANNEL_ID = 1434579615153913946       # Channel für Logs
 ROLE_NAME = "Pizzen"                       # Rolle, die erwähnt wird
+VM_ROLE_NAME = "VM"                        # Rolle für Erinnerungen
 TIMEZONE = pytz.timezone("Europe/Berlin")  # Deutsche Zeitzone
 
 # Deutsche Wochentage
@@ -26,6 +27,7 @@ WEEKDAYS_DE = {
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True  # Für Mitgliederzugriff
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -114,6 +116,65 @@ async def create_training_posts():
 
     await send_log("✅ Neue Trainingsposts für nächste Woche wurden erstellt.")
 
+async def send_reminders():
+    training_channel = bot.get_channel(TRAINING_CHANNEL_ID)
+    if not isinstance(training_channel, discord.TextChannel):
+        await send_log("❌ Trainingskanal für Erinnerungen nicht gefunden!")
+        return
+
+    guild = training_channel.guild
+    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
+    
+    if not vm_role:
+        await send_log(f"❌ Rolle '{VM_ROLE_NAME}' nicht gefunden!")
+        return
+
+    # Finde alle Trainingsnachrichten
+    training_messages = []
+    async for msg in training_channel.history(limit=50):
+        if msg.author == bot.user and "🏋️" in msg.content:
+            training_messages.append(msg)
+    
+    if not training_messages:
+        await send_log("⚠️ Keine Trainingsnachrichten zum Überprüfen gefunden.")
+        return
+
+    # Sammle alle Benutzer, die bereits reagiert haben
+    users_who_voted = set()
+    for msg in training_messages:
+        for reaction in msg.reactions:
+            if str(reaction.emoji) in ["👍", "👎"]:
+                async for user in reaction.users():
+                    if not user.bot:
+                        users_who_voted.add(user.id)
+
+    # Finde Mitglieder mit VM-Rolle, die nicht abgestimmt haben
+    members_to_remind = []
+    for member in guild.members:
+        if vm_role in member.roles and member.id not in users_who_voted and not member.bot:
+            members_to_remind.append(member)
+
+    # Sende DMs
+    successful = 0
+    failed = 0
+    for member in members_to_remind:
+        try:
+            await member.send(
+                f"👋 Hallo {member.name}!\n\n"
+                f"Du hast noch nicht für die Trainingstermine nächste Woche abgestimmt. "
+                f"Bitte schau im Channel <#{TRAINING_CHANNEL_ID}> vorbei und reagiere mit 👍 oder 👎.\n\n"
+                f"Danke! 🏋️"
+            )
+            successful += 1
+        except discord.errors.Forbidden:
+            failed += 1
+            print(f"Konnte {member.name} keine DM senden (DMs deaktiviert)")
+        except Exception as e:
+            failed += 1
+            print(f"Fehler beim Senden der DM an {member.name}: {e}")
+
+    await send_log(f"📬 Erinnerungen gesendet: {successful} erfolgreich, {failed} fehlgeschlagen")
+
 # === AUTOMATISCHER TASK ===
 @tasks.loop(minutes=1)
 async def send_training_messages():
@@ -121,11 +182,21 @@ async def send_training_messages():
     if now.weekday() == 4 and now.hour == 12 and now.minute == 0:  # Freitag 12 Uhr
         await create_training_posts()
 
+@tasks.loop(minutes=1)
+async def send_reminder_task():
+    now = datetime.datetime.now(TIMEZONE)
+    if now.weekday() == 6 and now.hour == 12 and now.minute == 0:  # Sonntag 12 Uhr
+        await send_reminders()
+
 @send_training_messages.before_loop
 async def before_send_loop():
     await bot.wait_until_ready()
     print("⏳ Bot bereit, warte auf Freitag 12:00 Uhr...")
     await send_log("🕒 Timer gestartet – warte auf Freitag 12:00 Uhr.")
+
+@send_reminder_task.before_loop
+async def before_reminder_loop():
+    await bot.wait_until_ready()
 
 # === MANUELLER BEFEHL ===
 @bot.command(name="training")
@@ -143,12 +214,30 @@ async def training_error(ctx, error):
         await send_log(f"❌ Fehler beim manuellen Erstellen von Trainingsposts: {error}")
         await ctx.send("❌ Ein Fehler ist aufgetreten. Bitte prüfe die Logs.")
 
+@bot.command(name="reminder")
+@commands.has_permissions(administrator=True)
+async def manual_reminder(ctx):
+    await send_log(f"🔔 Manuelle Erinnerung durch {ctx.author} ausgelöst.")
+    await ctx.send("⏳ Sende Erinnerungen an alle, die noch nicht abgestimmt haben...")
+    await send_reminders()
+    await ctx.send("✅ Erinnerungen wurden versendet!")
+
+@manual_reminder.error
+async def reminder_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Du brauchst Administratorrechte, um diesen Befehl zu verwenden.")
+    else:
+        await send_log(f"❌ Fehler beim manuellen Senden der Erinnerungen: {error}")
+        await ctx.send("❌ Ein Fehler ist aufgetreten. Bitte prüfe die Logs.")
+
 # === START ===
 @bot.event
 async def on_ready():
     print(f"✅ Bot online als {bot.user}")
     if not send_training_messages.is_running():
         send_training_messages.start()
+    if not send_reminder_task.is_running():
+        send_reminder_task.start()
     await send_log(f"Bot gestartet und bereit. Eingeloggt als **{bot.user}**.")
 
 bot.run(TOKEN)
