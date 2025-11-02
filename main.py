@@ -10,8 +10,19 @@ import pytz
 TOKEN = os.environ['TOKEN']  # Token als Secret auf Replit speichern
 TRAINING_CHANNEL_ID = 1434580297206202482  # Channel für Abstimmungen
 LOG_CHANNEL_ID = 1434579615153913946       # Channel für Logs
-ROLE_NAME = "pizzen"                       # Rolle, die erwähnt wird
+ROLE_NAME = "Pizzen"                       # Rolle, die erwähnt wird
 TIMEZONE = pytz.timezone("Europe/Berlin")  # Deutsche Zeitzone
+
+# Deutsche Wochentage
+WEEKDAYS_DE = {
+    0: "Montag",
+    1: "Dienstag",
+    2: "Mittwoch",
+    3: "Donnerstag",
+    4: "Freitag",
+    5: "Samstag",
+    6: "Sonntag"
+}
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -69,7 +80,7 @@ async def create_training_posts():
 
     guild = training_channel.guild
     role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    role_mention = role.mention if role else "@pizzen (Rolle nicht gefunden!)"
+    role_mention = role.mention if role else "@Pizzen (Rolle nicht gefunden!)"
 
     # Alte Posts löschen
     deleted = await delete_old_training_messages(training_channel)
@@ -78,7 +89,7 @@ async def create_training_posts():
     # Neue Trainingsposts posten
     next_week_dates = get_next_week_dates()
     for date in next_week_dates:
-        weekday_name = date.strftime("%A")
+        weekday_name = WEEKDAYS_DE[date.weekday()]
         formatted_date = date.strftime("%d.%m.%Y")
 
         try:
