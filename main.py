@@ -88,16 +88,18 @@ async def create_training_posts():
 
     # Neue Trainingsposts posten
     next_week_dates = get_next_week_dates()
-    for date in next_week_dates:
+    for index, date in enumerate(next_week_dates):
         weekday_name = WEEKDAYS_DE[date.weekday()]
         formatted_date = date.strftime("%d.%m.%Y")
+        
+        # Rolle nur bei der letzten Nachricht pingen
+        is_last = (index == len(next_week_dates) - 1)
+        message_content = f"{role_mention}\n" if is_last else ""
+        message_content += f"🏋️ **{weekday_name}, {formatted_date} – Training?**\n"
+        message_content += "Reagiere mit 👍 wenn du kommst, oder 👎 wenn nicht."
 
         try:
-            msg = await training_channel.send(
-                f"{role_mention}\n"
-                f"🏋️ **{weekday_name}, {formatted_date} – Training?**\n"
-                "Reagiere mit 👍 wenn du kommst, oder 👎 wenn nicht."
-            )
+            msg = await training_channel.send(message_content)
             try:
                 await msg.add_reaction("👍")
                 await msg.add_reaction("👎")
