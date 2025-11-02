@@ -4,12 +4,14 @@ import datetime
 from threading import Thread
 from flask import Flask
 import os
+import pytz
 
 # === CONFIG ===
 TOKEN = os.environ['TOKEN']  # Token als Secret auf Replit speichern
 TRAINING_CHANNEL_ID = 1434580297206202482  # Channel für Abstimmungen
 LOG_CHANNEL_ID = 1434579615153913946       # Channel für Logs
 ROLE_NAME = "pizzen"                       # Rolle, die erwähnt wird
+TIMEZONE = pytz.timezone("Europe/Berlin")  # Deutsche Zeitzone
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -50,7 +52,12 @@ async def delete_old_training_messages(channel):
 async def send_log(message: str):
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
     if log_channel and isinstance(log_channel, discord.TextChannel):
-        await log_channel.send(f"📝 {message}")
+        try:
+            await log_channel.send(f"📝 {message}")
+        except discord.errors.Forbidden:
+            print(f"[LOG-FEHLER] Keine Berechtigung zum Senden in Log-Channel: {message}")
+        except Exception as e:
+            print(f"[LOG-FEHLER] Fehler beim Senden der Log-Nachricht: {e} | {message}")
     else:
         print(f"[LOG-FEHLER] {message}")
 
@@ -74,20 +81,26 @@ async def create_training_posts():
         weekday_name = date.strftime("%A")
         formatted_date = date.strftime("%d.%m.%Y")
 
-        msg = await training_channel.send(
-            f"{role_mention}\n"
-            f"🏋️ **{weekday_name}, {formatted_date} – Training?**\n"
-            "Reagiere mit 👍 wenn du kommst, oder 👎 wenn nicht."
-        )
-        await msg.add_reaction("👍")
-        await msg.add_reaction("👎")
+        try:
+            msg = await training_channel.send(
+                f"{role_mention}\n"
+                f"🏋️ **{weekday_name}, {formatted_date} – Training?**\n"
+                "Reagiere mit 👍 wenn du kommst, oder 👎 wenn nicht."
+            )
+            try:
+                await msg.add_reaction("👍")
+                await msg.add_reaction("👎")
+            except Exception as e:
+                await send_log(f"⚠️ Fehler beim Hinzufügen von Reaktionen für {formatted_date}: {e}")
+        except Exception as e:
+            await send_log(f"❌ Fehler beim Senden der Trainingsnachricht für {formatted_date}: {e}")
 
     await send_log("✅ Neue Trainingsposts für nächste Woche wurden erstellt.")
 
 # === AUTOMATISCHER TASK ===
 @tasks.loop(minutes=1)
 async def send_training_messages():
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(TIMEZONE)
     if now.weekday() == 4 and now.hour == 12 and now.minute == 0:  # Freitag 12 Uhr
         await create_training_posts()
 
@@ -109,6 +122,9 @@ async def manual_training(ctx):
 async def training_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ Du brauchst Administratorrechte, um diesen Befehl zu verwenden.")
+    else:
+        await send_log(f"❌ Fehler beim manuellen Erstellen von Trainingsposts: {error}")
+        await ctx.send("❌ Ein Fehler ist aufgetreten. Bitte prüfe die Logs.")
 
 # === START ===
 @bot.event
