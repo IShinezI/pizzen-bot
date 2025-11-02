@@ -95,7 +95,7 @@ async def create_training_posts():
         # Rolle nur bei der letzten Nachricht pingen
         is_last = (index == len(next_week_dates) - 1)
         message_content = f"{role_mention}\n" if is_last else ""
-        message_content += f"🏋️ **{weekday_name}, {formatted_date} – Training?**\n"
+        message_content += f"🏋️ **{weekday_name}, {formatted_date}**\n"
         message_content += "Reagiere mit 👍 wenn du kommst, oder 👎 wenn nicht."
 
         try:
