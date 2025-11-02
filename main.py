@@ -52,7 +52,8 @@ def get_next_week_dates():
 async def delete_old_training_messages(channel):
     deleted_count = 0
     async for msg in channel.history(limit=200):
-        if msg.author == bot.user and "Training?" in msg.content:
+        # Löscht Trainingsnachrichten (mit 🏋️) und Ping-Nachrichten (nur Rolle)
+        if msg.author == bot.user and ("🏋️" in msg.content or (len(msg.role_mentions) > 0 and len(msg.content) < 50)):
             try:
                 await msg.delete()
                 deleted_count += 1
