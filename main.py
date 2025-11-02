@@ -88,14 +88,11 @@ async def create_training_posts():
 
     # Neue Trainingsposts posten
     next_week_dates = get_next_week_dates()
-    for index, date in enumerate(next_week_dates):
+    for date in next_week_dates:
         weekday_name = WEEKDAYS_DE[date.weekday()]
         formatted_date = date.strftime("%d.%m.%Y")
         
-        # Rolle nur bei der letzten Nachricht pingen
-        is_last = (index == len(next_week_dates) - 1)
-        message_content = f"{role_mention}\n" if is_last else ""
-        message_content += f"🏋️ **{weekday_name}, {formatted_date}**\n"
+        message_content = f"🏋️ **{weekday_name}, {formatted_date}**\n"
         message_content += "Reagiere mit 👍 wenn du kommst, oder 👎 wenn nicht."
 
         try:
@@ -107,6 +104,12 @@ async def create_training_posts():
                 await send_log(f"⚠️ Fehler beim Hinzufügen von Reaktionen für {formatted_date}: {e}")
         except Exception as e:
             await send_log(f"❌ Fehler beim Senden der Trainingsnachricht für {formatted_date}: {e}")
+
+    # Separate Ping-Nachricht senden
+    try:
+        await training_channel.send(role_mention)
+    except Exception as e:
+        await send_log(f"❌ Fehler beim Senden der Ping-Nachricht: {e}")
 
     await send_log("✅ Neue Trainingsposts für nächste Woche wurden erstellt.")
 
