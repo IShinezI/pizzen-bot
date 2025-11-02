@@ -94,7 +94,7 @@ async def create_training_posts():
         formatted_date = date.strftime("%d.%m.%Y")
         
         message_content = f"🏋️ **{weekday_name}, {formatted_date}**\n"
-        message_content += "Reagiere mit 👍 wenn du da bist, oder 👎 wenn nicht."
+        message_content += "Reagiere mit 👍 wenn du kannst, oder mit 👎 wenn nicht."
 
         try:
             msg = await training_channel.send(message_content)
