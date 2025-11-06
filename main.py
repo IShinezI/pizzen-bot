@@ -182,7 +182,7 @@ async def send_reminders():
 @tasks.loop(minutes=1)
 async def send_training_messages():
     now = datetime.datetime.now(TIMEZONE)
-    if now.weekday() == 4 and now.hour == 12 and now.minute == 0:  # Freitag 12 Uhr
+    if now.weekday() == 4 and now.hour == 14 and now.minute == 0:  # Freitag 12 Uhr
         await create_training_posts()
 
 @tasks.loop(minutes=1)
