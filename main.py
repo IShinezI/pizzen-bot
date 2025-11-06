@@ -7,11 +7,10 @@ import os
 import pytz
 
 # === CONFIG ===
-TOKEN = os.environ['TOKEN']  # Token als Secret auf Replit speichern
+TOKEN = os.environ['TOKEN']  # Token als Secret auf Render speichern
 TRAINING_CHANNEL_ID = 1434580297206202482  # Channel für Abstimmungen
 LOG_CHANNEL_ID = 1434579615153913946       # Channel für Logs
-ROLE_NAME = "Pizzen"                       # Rolle, die erwähnt wird
-VM_ROLE_NAME = "VM"                        # Rolle für Erinnerungen
+ROLE_NAME = "Pizzen"                       # Rolle, die erwähnt & erinnert wird
 TIMEZONE = pytz.timezone("Europe/Berlin")  # Deutsche Zeitzone
 
 # Deutsche Wochentage
@@ -85,6 +84,10 @@ async def create_training_posts():
     role = discord.utils.get(guild.roles, name=ROLE_NAME)
     role_mention = role.mention if role else "@Pizzen (Rolle nicht gefunden!)"
 
+    # Prüfe, ob der Bot die Rolle pingen darf
+    if role and not role.mentionable:
+        await send_log(f"⚠️ Achtung: Die Rolle '{ROLE_NAME}' ist nicht mentionable. Bitte aktivieren, sonst kein Ping!")
+
     # Alte Posts löschen
     deleted = await delete_old_training_messages(training_channel)
     await send_log(f"🧹 {deleted} alte Trainingsnachrichten gelöscht.")
@@ -94,7 +97,7 @@ async def create_training_posts():
     for date in next_week_dates:
         weekday_name = WEEKDAYS_DE[date.weekday()]
         formatted_date = date.strftime("%d.%m.%Y")
-        
+
         message_content = f"🏋️ **{weekday_name}, {formatted_date}**\n"
         message_content += "Reagiere mit 👍 wenn du kannst, oder mit 👎 wenn nicht."
 
@@ -123,10 +126,10 @@ async def send_reminders():
         return
 
     guild = training_channel.guild
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
-    
-    if not vm_role:
-        await send_log(f"❌ Rolle '{VM_ROLE_NAME}' nicht gefunden!")
+    pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
+
+    if not pizzen_role:
+        await send_log(f"❌ Rolle '{ROLE_NAME}' nicht gefunden!")
         return
 
     # Finde alle Trainingsnachrichten
@@ -134,7 +137,7 @@ async def send_reminders():
     async for msg in training_channel.history(limit=50):
         if msg.author == bot.user and "🏋️" in msg.content:
             training_messages.append(msg)
-    
+
     if not training_messages:
         await send_log("⚠️ Keine Trainingsnachrichten zum Überprüfen gefunden.")
         return
@@ -148,10 +151,10 @@ async def send_reminders():
                     if not user.bot:
                         users_who_voted.add(user.id)
 
-    # Finde Mitglieder mit VM-Rolle, die nicht abgestimmt haben
+    # Finde Mitglieder mit Pizzen-Rolle, die nicht abgestimmt haben
     members_to_remind = []
     for member in guild.members:
-        if vm_role in member.roles and member.id not in users_who_voted and not member.bot:
+        if pizzen_role in member.roles and member.id not in users_who_voted and not member.bot:
             members_to_remind.append(member)
 
     # Sende DMs
@@ -175,7 +178,7 @@ async def send_reminders():
 
     await send_log(f"📬 Erinnerungen gesendet: {successful} erfolgreich, {failed} fehlgeschlagen")
 
-# === AUTOMATISCHER TASK ===
+# === AUTOMATISCHE TASKS ===
 @tasks.loop(minutes=1)
 async def send_training_messages():
     now = datetime.datetime.now(TIMEZONE)
@@ -198,7 +201,7 @@ async def before_send_loop():
 async def before_reminder_loop():
     await bot.wait_until_ready()
 
-# === MANUELLER BEFEHL ===
+# === MANUELLE BEFEHLE ===
 @bot.command(name="training")
 @commands.has_permissions(administrator=True)
 async def manual_training(ctx):
