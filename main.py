@@ -30,7 +30,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ========= FLASK =========
+# ========= FLASK (Keep Alive) =========
 app = Flask("")
 
 @app.route("/")
@@ -72,7 +72,7 @@ async def get_votes(msg):
                     voted.add(user.id)
     return voted
 
-# ========= POST TRAININGS =========
+# ========= TRAININGS POSTS =========
 async def create_training_posts():
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
     guild = ch.guild
@@ -81,16 +81,17 @@ async def create_training_posts():
     dates = next_week_dates()
 
     for wd, date in dates.items():
-        text = (
+        msg = await ch.send(
             f"🏋️ **{TRAINING_DAYS[wd]}, {date.strftime('%d.%m.%Y')}**\n"
             "Reagiere mit 👍 oder 👎"
         )
-        msg = await ch.send(text)
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
 
-    await ch.send(role.mention)
-    await send_log("Trainingsposts erstellt")
+    if role:
+        await ch.send(role.mention)
+
+    await send_log("✅ Trainingsposts erstellt")
 
 # ========= REMINDER LOGIK =========
 async def remind_members(target_member=None):
@@ -116,12 +117,15 @@ async def remind_members(target_member=None):
         if missing:
             text = (
                 f"👋 Hallo {member.name}!\n\n"
-                f"Bitte stimme noch für folgende Trainingstage ab:\n"
+                f"Bitte stimme noch für folgende Trainingstage **hier** ab:\n"
+                f"👉 <#{TRAINING_CHANNEL_ID}>\n\n"
             )
+
             for d in missing:
                 text += f"• {d}\n"
 
             text += "\nDanke! 🏋️"
+
             try:
                 await member.send(text)
             except:
@@ -133,18 +137,6 @@ async def remind_members(target_member=None):
 async def remind(ctx, member: discord.Member):
     await remind_members(member)
     await ctx.send(f"🔔 Erinnerung an {member.mention} gesendet")
-
-@bot.command()
-async def montag(ctx):
-    await list_missing(ctx, 0)
-
-@bot.command()
-async def dienstag(ctx):
-    await list_missing(ctx, 1)
-
-@bot.command()
-async def donnerstag(ctx):
-    await list_missing(ctx, 3)
 
 async def list_missing(ctx, weekday):
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
@@ -162,11 +154,23 @@ async def list_missing(ctx, weekday):
 
     if missing:
         await ctx.send(
-            f"❌ Nicht abgestimmt für **{TRAINING_DAYS[weekday]}**:\n" +
+            f"❌ **Nicht abgestimmt für {TRAINING_DAYS[weekday]}**:\n" +
             ", ".join(missing)
         )
     else:
-        await ctx.send(f"✅ Alle haben für {TRAINING_DAYS[weekday]} abgestimmt!")
+        await ctx.send(f"✅ Alle haben für **{TRAINING_DAYS[weekday]}** abgestimmt!")
+
+@bot.command()
+async def montag(ctx):
+    await list_missing(ctx, 0)
+
+@bot.command()
+async def dienstag(ctx):
+    await list_missing(ctx, 1)
+
+@bot.command()
+async def donnerstag(ctx):
+    await list_missing(ctx, 3)
 
 # ========= TASKS =========
 @tasks.loop(minutes=1)
@@ -185,6 +189,6 @@ async def sunday_reminder():
 async def on_ready():
     friday_post.start()
     sunday_reminder.start()
-    await send_log("Bot gestartet")
+    await send_log("🚀 Bot gestartet")
 
 bot.run(TOKEN)
