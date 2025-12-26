@@ -30,7 +30,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ========= FLASK (Keep Alive) =========
+# ========= FLASK (für UptimeRobot / Render) =========
 app = Flask("")
 
 @app.route("/")
@@ -56,8 +56,8 @@ def next_week_dates():
 
 async def get_training_messages(channel):
     msgs = {}
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user:
+    async for msg in channel.history(limit=100):
+        if msg.author == bot.user and "🏋️" in msg.content:
             for wd, name in TRAINING_DAYS.items():
                 if name in msg.content:
                     msgs[wd] = msg
@@ -72,11 +72,16 @@ async def get_votes(msg):
                     voted.add(user.id)
     return voted
 
-# ========= TRAININGS POSTS =========
+# ========= TRAININGSPOSTS =========
 async def create_training_posts():
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
     guild = ch.guild
     role = discord.utils.get(guild.roles, name=ROLE_NAME)
+
+    # alte Trainingsposts löschen
+    async for msg in ch.history(limit=100):
+        if msg.author == bot.user and "🏋️" in msg.content:
+            await msg.delete()
 
     dates = next_week_dates()
 
@@ -91,25 +96,27 @@ async def create_training_posts():
     if role:
         await ch.send(role.mention)
 
-    await send_log("✅ Trainingsposts erstellt")
+    await send_log("✅ Trainingsposts neu erstellt")
 
-# ========= REMINDER LOGIK =========
-async def remind_members(target_member=None):
+# ========= REMINDER =========
+async def remind_members(target=None):
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
     guild = ch.guild
+    role = discord.utils.get(guild.roles, name=ROLE_NAME)
 
-    pizzen = discord.utils.get(guild.roles, name=ROLE_NAME)
-    training_msgs = await get_training_messages(ch)
+    msgs = await get_training_messages(ch)
+    if not msgs:
+        await send_log("⚠️ Keine Trainingsposts gefunden – Reminder abgebrochen")
+        return
 
     for member in guild.members:
-        if target_member and member.id != target_member.id:
+        if target and member.id != target.id:
             continue
-        if pizzen not in member.roles or member.bot:
+        if role not in member.roles or member.bot:
             continue
 
         missing = []
-
-        for wd, msg in training_msgs.items():
+        for wd, msg in msgs.items():
             voted = await get_votes(msg)
             if member.id not in voted:
                 missing.append(TRAINING_DAYS[wd])
@@ -118,9 +125,8 @@ async def remind_members(target_member=None):
             text = (
                 f"👋 Hallo {member.name}!\n\n"
                 f"Bitte stimme noch für folgende Trainingstage **hier** ab:\n"
-                f"👉 <#{TRAINING_CHANNEL_ID}>\n\n"
+                f"<#{TRAINING_CHANNEL_ID}>\n\n"
             )
-
             for d in missing:
                 text += f"• {d}\n"
 
@@ -131,13 +137,7 @@ async def remind_members(target_member=None):
             except:
                 pass
 
-# ========= COMMANDS =========
-@bot.command()
-@commands.has_role(VM_ROLE_NAME)
-async def remind(ctx, member: discord.Member):
-    await remind_members(member)
-    await ctx.send(f"🔔 Erinnerung an {member.mention} gesendet")
-
+# ========= LISTEN =========
 async def list_missing(ctx, weekday):
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
     guild = ch.guild
@@ -145,6 +145,10 @@ async def list_missing(ctx, weekday):
 
     msgs = await get_training_messages(ch)
     msg = msgs.get(weekday)
+
+    if not msg:
+        await ctx.send("❌ Kein Trainingspost gefunden.")
+        return
 
     voted = await get_votes(msg)
     missing = [
@@ -154,11 +158,18 @@ async def list_missing(ctx, weekday):
 
     if missing:
         await ctx.send(
-            f"❌ **Nicht abgestimmt für {TRAINING_DAYS[weekday]}**:\n" +
+            f"❌ Nicht abgestimmt für **{TRAINING_DAYS[weekday]}**:\n" +
             ", ".join(missing)
         )
     else:
-        await ctx.send(f"✅ Alle haben für **{TRAINING_DAYS[weekday]}** abgestimmt!")
+        await ctx.send(f"✅ Alle haben für {TRAINING_DAYS[weekday]} abgestimmt!")
+
+# ========= COMMANDS =========
+@bot.command()
+@commands.has_role(VM_ROLE_NAME)
+async def remind(ctx, member: discord.Member):
+    await remind_members(member)
+    await ctx.send(f"🔔 Erinnerung an {member.mention} gesendet")
 
 @bot.command()
 async def montag(ctx):
@@ -171,6 +182,12 @@ async def dienstag(ctx):
 @bot.command()
 async def donnerstag(ctx):
     await list_missing(ctx, 3)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def training(ctx):
+    await create_training_posts()
+    await ctx.send("✅ Trainingsposts neu erstellt")
 
 # ========= TASKS =========
 @tasks.loop(minutes=1)
@@ -189,6 +206,6 @@ async def sunday_reminder():
 async def on_ready():
     friday_post.start()
     sunday_reminder.start()
-    await send_log("🚀 Bot gestartet")
+    await send_log("🚀 Bot gestartet und bereit")
 
 bot.run(TOKEN)
