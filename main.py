@@ -190,16 +190,50 @@ async def delete_einzel_channel(member):
 
 # ========= EVENTS =========
 @bot.event
-async def on_member_update(before, after):
-    pizzen_role = discord.utils.get(after.guild.roles, name=ROLE_NAME)
+async def on_member_update(before: discord.Member, after: discord.Member):
+    guild = after.guild
+    pizzen_role = discord.utils.get(guild.roles, name="Pizzen")
+    vm_role = discord.utils.get(guild.roles, name="VM")
+    category = guild.get_channel(1330628490621354108)  # Einzelgespräche Kategorie
 
-    # Rolle hinzugefügt -> Einzelgespräch erstellen
-    if pizzen_role and pizzen_role not in before.roles and pizzen_role in after.roles:
-        await create_einzel_channel(after)
+    if not pizzen_role or not vm_role or not category:
+        await send_log("❌ Rolle 'Pizzen', 'VM' oder Kategorie für Einzelgespräche nicht gefunden")
+        return
 
-    # Rolle entfernt -> Channel löschen
-    if pizzen_role and pizzen_role in before.roles and pizzen_role not in after.roles:
-        await delete_einzel_channel(after)
+    # Rolle hinzugefügt?
+    had_role_before = pizzen_role in before.roles
+    has_role_now = pizzen_role in after.roles
+
+    if not had_role_before and has_role_now:
+        # Channel erstellen
+        channel_name = f"einzelgespraech-{after.name.lower()}"
+        existing = discord.utils.get(category.channels, name=channel_name)
+        if existing:
+            await send_log(f"⚠️ Einzelgespräch-Channel für {after.name} existiert bereits")
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            after: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
+        }
+
+        channel = await guild.create_text_channel(
+            name=channel_name,
+            category=category,
+            overwrites=overwrites,
+            reason="Automatisch Einzelgespräch-Channel für Pizzen-Rolle"
+        )
+
+        await channel.send(
+            f"👋 Hallo {after.mention}!\n"
+            "Dies ist dein persönlicher Einzelgespräch-Channel.\n"
+            "Die VM-Rolle kann hier ebenfalls schreiben."
+        )
+
+        await send_log(f"✅ Einzelgespräch-Channel erstellt für {after.name}")
+
 
 # ========= COMMANDS =========
 @bot.command()
