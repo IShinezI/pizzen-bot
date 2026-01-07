@@ -89,7 +89,7 @@ async def on_member_join(member: discord.Member):
     await channel.send(
         f"👋 Willkommen {member.mention}!\n\n"
         "Dies ist dein persönlicher Tester-Channel.\n"
-        "Bei Fragen melde dich bei der **VM** 👋"
+        "Bei Fragen oder anderen Anliegen melde dich gerne hier bei uns **VM´s** 👋"
     )
 
     await send_log(f"🧪 Tester-Channel erstellt für {member.name}")
@@ -109,6 +109,31 @@ async def on_member_remove(member: discord.Member):
             await channel.delete(reason="Tester hat Server verlassen")
             await send_log(f"🗑️ Tester-Channel gelöscht: {channel.name}")
             break
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    guild = after.guild
+
+    tester_role = discord.utils.get(guild.roles, name=TESTER_ROLE_NAME)
+    category = guild.get_channel(TESTER_CATEGORY_ID)
+
+    if not tester_role or not category:
+        return
+
+    # Prüfen: Tester-Rolle wurde entfernt
+    had_tester_before = tester_role in before.roles
+    has_tester_now = tester_role in after.roles
+
+    if had_tester_before and not has_tester_now:
+        expected_channel_name = f"tester-{safe_name(after.name)}"
+
+        for channel in category.channels:
+            if channel.name == expected_channel_name:
+                await channel.delete(reason="Tester-Rolle entfernt")
+                await send_log(
+                    f"🗑️ Tester-Channel gelöscht (Rolle entfernt): {channel.name}"
+                )
+                break
+
 
 # ========= TRAINING / REMINDER =========
 def next_week_dates():
