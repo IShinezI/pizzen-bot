@@ -28,7 +28,9 @@ TRAINING_DAYS = {
 }
 
 # ========= BOT =========
-intents = discord.Intents.all()  # 🔹 WICHTIG für Member/Rollen Updates
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ========= FLASK =========
@@ -45,7 +47,7 @@ async def send_log(text):
     ch = bot.get_channel(LOG_CHANNEL_ID)
     if ch:
         await ch.send(f"📝 {text}")
-    print(f"[LOG] {text}")  # auch Konsole
+    print(f"[LOG] {text}")
 
 def safe_name(name: str):
     name = name.lower()
@@ -84,7 +86,6 @@ async def create_training_posts():
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
     guild = ch.guild
     role = discord.utils.get(guild.roles, name=ROLE_NAME)
-
     dates = next_week_dates()
 
     for wd, date in dates.items():
@@ -97,6 +98,54 @@ async def create_training_posts():
 
     await ch.send(role.mention)
     await send_log("✅ Trainingsposts erstellt")
+
+# ========= EINZELGESPRÄCH-CHANNEL =========
+async def create_einzel_channel(member):
+    guild = member.guild
+    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
+    cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
+    if not vm_role or not cat:
+        await send_log("❌ VM-Rolle oder Einzelgespräche Kategorie fehlt")
+        return
+
+    channel_name = f"einzelgespraech-{safe_name(member.name)}"
+    existing = discord.utils.get(cat.text_channels, name=channel_name)
+    if existing:
+        return
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
+    }
+
+    ch = await guild.create_text_channel(
+        name=channel_name,
+        category=cat,
+        overwrites=overwrites,
+        reason="Einzelgespräch-Channel für Pizzen-Rolle"
+    )
+
+    await ch.send(
+        f"👋 Hallo {member.mention}!\n"
+        "Dies ist dein persönlicher Einzelgespräch-Channel.\n"
+        "Die VM-Rolle kann hier ebenfalls schreiben."
+    )
+    await send_log(f"✅ Einzelgespräch-Channel erstellt: {channel_name}")
+
+async def delete_einzel_channel(member):
+    guild = member.guild
+    cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
+    if not cat:
+        return
+
+    channel_name = f"einzelgespraech-{safe_name(member.name)}"
+    for ch in cat.text_channels:
+        if ch.name == channel_name:
+            await ch.delete(reason="Pizzen-Rolle entfernt")
+            await send_log(f"🗑️ Einzelgespräch-Channel gelöscht: {channel_name}")
+            break
 
 # ========= REMINDER =========
 async def remind_members(target_member=None):
@@ -124,7 +173,7 @@ async def remind_members(target_member=None):
                 missing.append(TRAINING_DAYS[wd])
 
         if missing:
-            # Finde den Einzelgespräch-Channel
+            # Einzelgespräch-Channel finden
             channel_name = f"einzelgespraech-{safe_name(member.name)}"
             eg_ch = discord.utils.get(einzel_cat.text_channels, name=channel_name)
             if eg_ch:
@@ -138,134 +187,24 @@ async def remind_members(target_member=None):
                 text += "\nDanke! 🏋️"
                 await eg_ch.send(text)
 
-# ========= EINZELGESPRÄCH-CHANNEL =========
-async def create_einzel_channel(member):
-    guild = member.guild
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
-    cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
-    if not vm_role or not cat:
-        await send_log("❌ VM-Rolle oder Einzelgespräche Kategorie fehlt")
-        return
-
-    channel_name = f"einzelgespraech-{safe_name(member.name)}"
-    existing = discord.utils.get(cat.text_channels, name=channel_name)
-    if existing:
-        return  # schon vorhanden
-
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
-    }
-
-    ch = await guild.create_text_channel(
-        name=channel_name,
-        category=cat,
-        overwrites=overwrites,
-        reason="Einzelgespräch für Pizzen-Rolle"
-    )
-
-    await ch.send(
-        f"👋 Willkommen {member.mention}!\n\n"
-        f"Dies ist dein persönlicher Einzelgespräch-Channel. "
-        f"VMs können hier mit dir kommunizieren."
-    )
-    await send_log(f"✅ Einzelgespräch-Channel erstellt: {channel_name}")
-
-async def delete_einzel_channel(member):
-    guild = member.guild
-    cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
-    if not cat:
-        return
-
-    channel_name = f"einzelgespraech-{safe_name(member.name)}"
-    for ch in cat.text_channels:
-        if ch.name == channel_name:
-            await ch.delete(reason="Pizzen-Rolle entfernt")
-            await send_log(f"🗑️ Einzelgespräch-Channel gelöscht: {channel_name}")
-            break
-
-# ========= TESTER-CHANNEL =========
-async def create_tester_channel(member):
-    guild = member.guild
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
-    cat = guild.get_channel(TESTER_CATEGORY_ID)
-    tester_role = discord.utils.get(guild.roles, name=TESTER_ROLE_NAME)
-    if not vm_role or not cat or not tester_role:
-        await send_log("❌ Tester-Rolle oder Kategorie fehlt")
-        return
-
-    channel_name = f"tester-{safe_name(member.name)}"
-    existing = discord.utils.get(cat.text_channels, name=channel_name)
-    if existing:
-        return
-
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
-    }
-
-    ch = await guild.create_text_channel(
-        name=channel_name,
-        category=cat,
-        overwrites=overwrites,
-        reason="Tester-Channel erstellt"
-    )
-
-    await ch.send(
-        f"👋 Willkommen {member.mention}!\n"
-        "Dies ist dein persönlicher Tester-Channel. VMs können hier schreiben."
-    )
-    await send_log(f"🧪 Tester-Channel erstellt: {channel_name}")
-
-async def delete_tester_channel(member):
-    guild = member.guild
-    cat = guild.get_channel(TESTER_CATEGORY_ID)
-    if not cat:
-        return
-
-    channel_name = f"tester-{safe_name(member.name)}"
-    for ch in cat.text_channels:
-        if ch.name == channel_name:
-            await ch.delete(reason="Tester-Rolle entfernt")
-            await send_log(f"🗑️ Tester-Channel gelöscht: {channel_name}")
-            break
-
 # ========= EVENTS =========
 @bot.event
-async def on_member_join(member):
-    tester_role = discord.utils.get(member.guild.roles, name=TESTER_ROLE_NAME)
-    if tester_role:
-        await member.add_roles(tester_role, reason="Automatisch beim Join")
-        await create_tester_channel(member)
-
-@bot.event
-async def on_member_update(before, after):
+async def on_member_update(before: discord.Member, after: discord.Member):
     guild = after.guild
-    pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    tester_role = discord.utils.get(guild.roles, name=TESTER_ROLE_NAME)
+    pizzen_role = discord.utils.get(guild.roles, name="Pizzen")
+    if not pizzen_role:
+        await send_log("❌ Rolle 'Pizzen' nicht gefunden")
+        return
 
-    # 🔹 Logging
-    print(f"[EVENT] on_member_update fired for {after.name}")
+    had_role_before = pizzen_role in before.roles
+    has_role_now = pizzen_role in after.roles
 
-    # Rolle Pizzen hinzugefügt
-    if pizzen_role not in before.roles and pizzen_role in after.roles:
+    if not had_role_before and has_role_now:
+        # Rolle hinzugefügt → Channel erstellen
         await create_einzel_channel(after)
-
-    # Rolle Pizzen entfernt
-    if pizzen_role in before.roles and pizzen_role not in after.roles:
+    elif had_role_before and not has_role_now:
+        # Rolle entfernt → Channel löschen
         await delete_einzel_channel(after)
-
-    # Rolle Tester hinzugefügt
-    if tester_role not in before.roles and tester_role in after.roles:
-        await create_tester_channel(after)
-
-    # Rolle Tester entfernt
-    if tester_role in before.roles and tester_role not in after.roles:
-        await delete_tester_channel(after)
 
 # ========= COMMANDS =========
 @bot.command()
