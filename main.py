@@ -100,46 +100,6 @@ async def create_training_posts():
     await ch.send(role.mention)
     await send_log("✅ Trainingsposts erstellt")
 
-# ========= REMINDER =========
-async def remind_members(target_member=None):
-    ch = bot.get_channel(TRAINING_CHANNEL_ID)
-    guild = ch.guild
-    pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
-    einzel_cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
-
-    if not pizzen_role or not vm_role or not einzel_cat:
-        await send_log("❌ Rolle oder Kategorie für Erinnerungen fehlt")
-        return
-
-    msgs = await get_training_messages(ch)
-
-    for member in guild.members:
-        if member.bot or pizzen_role not in member.roles:
-            continue
-        if target_member and member.id != target_member.id:
-            continue
-
-        missing = []
-        for wd, msg in msgs.items():
-            if member.id not in await get_votes(msg):
-                missing.append(TRAINING_DAYS[wd])
-
-        if missing:
-            # Finde den Einzelgespräch-Channel
-            channel_name = f"einzelgespraech-{safe_name(member.name)}"
-            eg_ch = discord.utils.get(einzel_cat.text_channels, name=channel_name)
-            if eg_ch:
-                text = (
-                    f"👋 Hallo {member.mention}!\n\n"
-                    f"Bitte stimme **hier** für folgende Trainingstage ab:\n"
-                    f"👉 <#{TRAINING_CHANNEL_ID}>\n\n"
-                )
-                for d in missing:
-                    text += f"• {d}\n"
-                text += "\nDanke! 🏋️"
-                await eg_ch.send(text)
-
 # ========= EINZELGESPRÄCH-CHANNEL =========
 async def create_einzel_channel(member):
     guild = member.guild
@@ -149,17 +109,17 @@ async def create_einzel_channel(member):
         await send_log("❌ VM-Rolle oder Einzelgespräche Kategorie fehlt")
         return
 
+    channel_name = f"einzelgespraech-{safe_name(member.name)}"
+    existing = discord.utils.get(cat.text_channels, name=channel_name)
+    if existing:
+        return  # Channel schon vorhanden
+
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
     }
-
-    channel_name = f"einzelgespraech-{safe_name(member.name)}"
-    existing = discord.utils.get(cat.text_channels, name=channel_name)
-    if existing:
-        return  # schon vorhanden
 
     ch = await guild.create_text_channel(
         name=channel_name,
@@ -169,9 +129,9 @@ async def create_einzel_channel(member):
     )
 
     await ch.send(
-        f"👋 Willkommen {member.mention}!\n\n"
-        f"Dies ist dein persönlicher Einzelgespräch-Channel. "
-        f"VMs können hier mit dir kommunizieren."
+        f"👋 Willkommen {member.mention}!\n"
+        "Dies ist dein persönlicher Einzelgespräch-Channel.\n"
+        "VMs können hier mit dir kommunizieren."
     )
     await send_log(f"✅ Einzelgespräch-Channel erstellt: {channel_name}")
 
@@ -188,52 +148,57 @@ async def delete_einzel_channel(member):
             await send_log(f"🗑️ Einzelgespräch-Channel gelöscht: {channel_name}")
             break
 
+# ========= REMINDER =========
+async def remind_members(target_member=None):
+    ch = bot.get_channel(TRAINING_CHANNEL_ID)
+    guild = ch.guild
+    pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
+    msgs = await get_training_messages(ch)
+    einzel_cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
+
+    for member in guild.members:
+        if member.bot or pizzen_role not in member.roles:
+            continue
+        if target_member and member.id != target_member.id:
+            continue
+
+        missing = []
+        for wd, msg in msgs.items():
+            if member.id not in await get_votes(msg):
+                missing.append(TRAINING_DAYS[wd])
+
+        if missing:
+            channel_name = f"einzelgespraech-{safe_name(member.name)}"
+            eg_ch = discord.utils.get(einzel_cat.text_channels, name=channel_name)
+            if eg_ch:
+                text = (
+                    f"👋 Hallo {member.mention}!\n\n"
+                    f"Bitte stimme **hier** für folgende Trainingstage ab:\n"
+                    f"👉 <#{TRAINING_CHANNEL_ID}>\n\n"
+                )
+                for d in missing:
+                    text += f"• {d}\n"
+                text += "\nDanke! 🏋️"
+                await eg_ch.send(text)
+
 # ========= EVENTS =========
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
-    guild = after.guild
-    pizzen_role = discord.utils.get(guild.roles, name="Pizzen")
-    vm_role = discord.utils.get(guild.roles, name="VM")
-    category = guild.get_channel(1330628490621354108)  # Einzelgespräche Kategorie
+    pizzen_role = discord.utils.get(after.guild.roles, name=ROLE_NAME)
 
-    if not pizzen_role or not vm_role or not category:
-        await send_log("❌ Rolle 'Pizzen', 'VM' oder Kategorie für Einzelgespräche nicht gefunden")
+    if not pizzen_role:
         return
 
-    # Rolle hinzugefügt?
     had_role_before = pizzen_role in before.roles
     has_role_now = pizzen_role in after.roles
 
+    # Rolle hinzugefügt -> Channel erstellen
     if not had_role_before and has_role_now:
-        # Channel erstellen
-        channel_name = f"einzelgespraech-{after.name.lower()}"
-        existing = discord.utils.get(category.channels, name=channel_name)
-        if existing:
-            await send_log(f"⚠️ Einzelgespräch-Channel für {after.name} existiert bereits")
-            return
+        await create_einzel_channel(after)
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            after: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
-        }
-
-        channel = await guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            overwrites=overwrites,
-            reason="Automatisch Einzelgespräch-Channel für Pizzen-Rolle"
-        )
-
-        await channel.send(
-            f"👋 Hallo {after.mention}!\n"
-            "Dies ist dein persönlicher Einzelgespräch-Channel.\n"
-            "Die VM-Rolle kann hier ebenfalls schreiben."
-        )
-
-        await send_log(f"✅ Einzelgespräch-Channel erstellt für {after.name}")
-
+    # Rolle entfernt -> Channel löschen
+    if had_role_before and not has_role_now:
+        await delete_einzel_channel(after)
 
 # ========= COMMANDS =========
 @bot.command()
@@ -295,6 +260,15 @@ async def sunday_reminder():
 # ========= ON_READY =========
 @bot.event
 async def on_ready():
+    # Bestehende Pizzen-Members prüfen und Channels erstellen
+    for guild in bot.guilds:
+        pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
+        if not pizzen_role:
+            continue
+        for member in guild.members:
+            if pizzen_role in member.roles and not member.bot:
+                await create_einzel_channel(member)
+
     friday_post.start()
     sunday_reminder.start()
     await send_log("✅ Bot gestartet")
