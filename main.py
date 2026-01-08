@@ -28,7 +28,8 @@ TRAINING_DAYS = {
 }
 
 # ========= BOT =========
-intents = discord.Intents.default()
+
+intents = discord.Intents.all()  # statt default + message_content + members
 intents.members = True
 intents.message_content = True
 
@@ -71,6 +72,10 @@ async def get_training_messages(channel):
                 if name in msg.content:
                     msgs[wd] = msg
     return msgs
+@bot.event
+async def on_member_update(before, after):
+    print(f"Event on_member_update: {before.name}")
+
 
 async def get_votes(msg):
     voted = set()
