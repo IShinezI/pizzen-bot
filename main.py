@@ -1,10 +1,8 @@
 import discord
 from discord.ext import commands, tasks
 import datetime
-from threading import Thread
-from flask import Flask
-import os
 import pytz
+import os
 import re
 
 # ========= CONFIG =========
@@ -14,10 +12,12 @@ TRAINING_CHANNEL_ID = 1434580297206202482
 TEST_TRAINING_CHANNEL_ID = 1459256713994571938
 LOG_CHANNEL_ID = 1434579615153913946
 
+TESTER_CATEGORY_ID = 1330612560780857344
 EINZELGESPRAECHE_CATEGORY_ID = 1330628490621354108
 
 ROLE_NAME = "Pizzen"
 VM_ROLE_NAME = "VM"
+TESTER_ROLE_NAME = "Tester"
 
 TIMEZONE = pytz.timezone("Europe/Berlin")
 
@@ -34,16 +34,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ========= FLASK =========
-app = Flask("")
-
-@app.route("/")
-def home():
-    return "Bot läuft"
-
-Thread(target=lambda: app.run("0.0.0.0", 5000), daemon=True).start()
-
-# ========= HILFSFUNKTIONEN =========
+# ========= HELPER =========
 async def send_log(text):
     ch = bot.get_channel(LOG_CHANNEL_ID)
     if ch:
@@ -51,13 +42,41 @@ async def send_log(text):
 
 def safe_name(name: str):
     name = name.lower()
-    name = name.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
-    name = re.sub(r"[^a-z0-9\-]", "-", name)
-    return name[:90]
+    return re.sub(r"[^a-z0-9]", "-", name)[:90]
+
+# ========= TRAINING =========
+def next_week_dates():
+    today = datetime.date.today()
+    monday = today + datetime.timedelta(days=(7 - today.weekday()))
+    return {
+        0: monday,
+        1: monday + datetime.timedelta(days=1),
+        3: monday + datetime.timedelta(days=3)
+    }
+
+async def delete_old_training_posts(channel):
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and any(day in msg.content for day in TRAINING_DAYS.values()):
+            await msg.delete()
+
+async def create_training_posts(channel_id):
+    ch = bot.get_channel(channel_id)
+    await delete_old_training_posts(ch)
+
+    dates = next_week_dates()
+    for wd, date in dates.items():
+        msg = await ch.send(
+            f"🏋️ **{TRAINING_DAYS[wd]}, {date.strftime('%d.%m.%Y')}**\n"
+            "Reagiere mit 👍 oder 👎"
+        )
+        await msg.add_reaction("👍")
+        await msg.add_reaction("👎")
+
+    await send_log("✅ Trainingsposts erstellt")
 
 async def get_training_messages(channel):
     msgs = {}
-    async for msg in channel.history(limit=100):
+    async for msg in channel.history(limit=50):
         if msg.author == bot.user:
             for wd, name in TRAINING_DAYS.items():
                 if name in msg.content:
@@ -73,52 +92,25 @@ async def get_votes(msg):
                     voted.add(user.id)
     return voted
 
-# ========= TRAININGSPOSTS =========
-async def clear_training_posts(channel):
-    async for msg in channel.history(limit=100):
-        if msg.author == bot.user:
-            await msg.delete()
-
-async def create_training_posts(channel):
-    await clear_training_posts(channel)
-
-    today = datetime.date.today()
-    monday = today + datetime.timedelta(days=(7 - today.weekday()))
-
-    dates = {
-        0: monday,
-        1: monday + datetime.timedelta(days=1),
-        3: monday + datetime.timedelta(days=3)
-    }
-
-    for wd, date in dates.items():
-        msg = await channel.send(
-            f"🏋️ **{TRAINING_DAYS[wd]}, {date.strftime('%d.%m.%Y')}**\n"
-            "Reagiere mit 👍 oder 👎"
-        )
-        await msg.add_reaction("👍")
-        await msg.add_reaction("👎")
-
-    await send_log("✅ Trainingsposts erstellt")
-
-# ========= EINZELGESPRÄCH =========
+# ========= EINZELGESPRÄCHE =========
 async def find_einzel_channel(member):
     cat = member.guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
     if not cat:
         return None
 
     for ch in cat.text_channels:
-        if member.id in [o.id for o in ch.overwrites if isinstance(o, discord.Member)]:
+        perms = ch.permissions_for(member)
+        if perms.view_channel:
             return ch
     return None
 
 async def create_einzel_channel(member):
     guild = member.guild
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
     cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
+    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
 
-    if not vm_role or not cat:
-        await send_log("❌ VM-Rolle oder Kategorie fehlt")
+    if not cat or not vm_role:
+        await send_log("❌ Einzelgespräch: Kategorie oder VM Rolle fehlt")
         return
 
     if await find_einzel_channel(member):
@@ -128,27 +120,25 @@ async def create_einzel_channel(member):
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True)
+        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
     }
 
-    channel = await guild.create_text_channel(
+    ch = await guild.create_text_channel(
         name=f"einzelgespräch-{safe_name(member.name)}",
         category=cat,
         overwrites=overwrites
     )
 
-    await channel.send(
+    await ch.send(
         f"Hallo {member.mention}\n\n"
-        "Vielen herzlichen Dank, dass du dich unserem Projekt angeschlossen hast "
-        "und auf lange und erfolgreiche Zeit mit uns zusammenarbeiten willst.\n\n"
-        "Dies ist dein eigener **Einzelgespräche-Channel**. "
-        "Hier kannst du jederzeit vertraulich mit uns 3 VM's unter 8 Augen sprechen.\n\n"
-        "Alles was hier geschrieben wird, bleibt auch hier. "
-        "Wir bitten dich, dies zu respektieren.\n\n"
-        "Natürlich erwarten wir einen respektvollen und höflichen Umgang "
-        "– von dir wie auch von unserer Seite.\n\n"
+        "Vielen herzlichen Dank, dass du dich unserem Projekt angeschlossen hast und "
+        "auf lange und erfolgreiche Zeit mit uns zusammenarbeiten willst. "
+        "Dies ist dein eigener **Einzelgespräche-Channel**.\n\n"
+        "Hier kannst du jederzeit vertraulich mit uns 3 VM's unter 8 Augen sprechen. "
+        "Alles was hier geschrieben wird, bleibt auch hier.\n\n"
+        "Bitte achte auf einen respektvollen und höflichen Umgangston.\n\n"
         "Liebe Grüße\n"
-        "Shinez, Flo & Birdie 🍕"
+        "**Shinez, Flo & Birdie** 🍕"
     )
 
     await send_log(f"✅ Einzelgespräch erstellt für {member.name}")
@@ -159,23 +149,11 @@ async def delete_einzel_channel(member):
         await ch.delete()
         await send_log(f"🗑️ Einzelgespräch gelöscht für {member.name}")
 
-# ========= EVENTS =========
-@bot.event
-async def on_member_update(before, after):
-    pizzen = discord.utils.get(after.guild.roles, name=ROLE_NAME)
-
-    if pizzen not in before.roles and pizzen in after.roles:
-        await create_einzel_channel(after)
-
-    if pizzen in before.roles and pizzen not in after.roles:
-        await delete_einzel_channel(after)
-
 # ========= REMINDER =========
 async def remind_members(target=None):
-    ch = bot.get_channel(TRAINING_CHANNEL_ID)
-    guild = ch.guild
+    guild = target.guild if target else bot.guilds[0]
     pizzen = discord.utils.get(guild.roles, name=ROLE_NAME)
-
+    ch = guild.get_channel(TRAINING_CHANNEL_ID)
     msgs = await get_training_messages(ch)
 
     for member in guild.members:
@@ -194,56 +172,97 @@ async def remind_members(target=None):
             if eg:
                 text = (
                     f"👋 Hallo {member.mention}\n\n"
-                    f"Bitte stimme **hier** ab:\n"
-                    f"👉 <#{TRAINING_CHANNEL_ID}>\n\n"
+                    f"Bitte stimme hier ab 👉 <#{TRAINING_CHANNEL_ID}>\n\n"
                 )
                 for d in missing:
                     text += f"• {d}\n"
                 await eg.send(text)
 
+# ========= EVENTS =========
+@bot.event
+async def on_member_update(before, after):
+    guild = after.guild
+    pizzen = discord.utils.get(guild.roles, name=ROLE_NAME)
+
+    if pizzen not in before.roles and pizzen in after.roles:
+        await create_einzel_channel(after)
+
+    if pizzen in before.roles and pizzen not in after.roles:
+        await delete_einzel_channel(after)
+
 # ========= COMMANDS =========
 @bot.command()
-async def remind(ctx, member: discord.Member = None):
-    vm = discord.utils.get(ctx.guild.roles, name=VM_ROLE_NAME)
-    if vm not in ctx.author.roles:
-        await ctx.send("❌ Keine Berechtigung.")
+async def remind(ctx, member: str = None):
+    if VM_ROLE_NAME not in [r.name for r in ctx.author.roles]:
+        await ctx.send("❌ Keine Berechtigung")
         return
 
-    await ctx.send("🔄 Erinnerungen werden geprüft …")
-    await remind_members(member)
-    await ctx.send("🔔 Erinnerung(en) gesendet.")
+    target = None
+    if member:
+        mid = re.sub(r"[<@!>]", "", member)
+        if mid.isdigit():
+            target = ctx.guild.get_member(int(mid))
+
+    await ctx.send("🔄 Erinnerungen werden gesendet …")
+    await remind_members(target)
+    await ctx.send("🔔 Fertig")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def training(ctx):
-    await create_training_posts(ctx.channel)
+    await create_training_posts(TRAINING_CHANNEL_ID)
     await ctx.send("✅ Trainingsposts erstellt")
 
 @bot.command()
+@commands.has_permissions(administrator=True)
 async def testtraining(ctx):
-    ch = bot.get_channel(TEST_TRAINING_CHANNEL_ID)
-    await create_training_posts(ch)
+    await create_training_posts(TEST_TRAINING_CHANNEL_ID)
     await ctx.send("🧪 Test-Trainingsposts erstellt")
 
+async def list_missing(ctx, wd):
+    ch = bot.get_channel(TRAINING_CHANNEL_ID)
+    role = discord.utils.get(ctx.guild.roles, name=ROLE_NAME)
+    msgs = await get_training_messages(ch)
+    msg = msgs.get(wd)
+
+    if not msg:
+        await ctx.send("❌ Keine Trainingspost gefunden")
+        return
+
+    voted = await get_votes(msg)
+    missing = [m.mention for m in ctx.guild.members if role in m.roles and m.id not in voted and not m.bot]
+
+    if missing:
+        await ctx.send(f"❌ Nicht abgestimmt für **{TRAINING_DAYS[wd]}**:\n" + ", ".join(missing))
+    else:
+        await ctx.send(f"✅ Alle haben für {TRAINING_DAYS[wd]} abgestimmt!")
+
+@bot.command()
+async def montag(ctx): await list_missing(ctx, 0)
+
+@bot.command()
+async def dienstag(ctx): await list_missing(ctx, 1)
+
+@bot.command()
+async def donnerstag(ctx): await list_missing(ctx, 3)
+
 # ========= TASKS =========
+@tasks.loop(minutes=1)
+async def friday_post():
+    now = datetime.datetime.now(TIMEZONE)
+    if now.weekday() == 4 and now.hour == 14 and now.minute == 0:
+        await create_training_posts(TRAINING_CHANNEL_ID)
+
 @tasks.loop(minutes=1)
 async def sunday_reminder():
     now = datetime.datetime.now(TIMEZONE)
     if now.weekday() == 6 and now.hour == 12 and now.minute == 0:
         await remind_members()
 
-# ========= ERROR HANDLING =========
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
-    await ctx.send(f"❌ Fehler: {error}")
-    await send_log(str(error))
-
-# ========= READY =========
 @bot.event
 async def on_ready():
+    friday_post.start()
     sunday_reminder.start()
-    await send_log("✅ Bot gestartet")
+    await send_log("🚀 Bot gestartet")
 
 bot.run(TOKEN)
