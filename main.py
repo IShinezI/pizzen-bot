@@ -11,6 +11,7 @@ import re
 TOKEN = os.environ["TOKEN"]
 
 TRAINING_CHANNEL_ID = 1434580297206202482
+TEST_TRAINING_CHANNEL_ID = 1459256713994571938
 LOG_CHANNEL_ID = 1434579615153913946
 TESTER_CATEGORY_ID = 1330612560780857344
 EINZELGESPRAECHE_CATEGORY_ID = 1330628490621354108
@@ -58,13 +59,11 @@ def find_einzel_channel(guild, member):
     cat = guild.get_channel(EINZELGESPRAECHE_CATEGORY_ID)
     if not cat:
         return None
-
     for ch in cat.text_channels:
         if ch.topic == f"user_id:{member.id}":
             return ch
     return None
 
-# ========= TRAININGS =========
 def next_week_dates():
     today = datetime.date.today()
     monday = today + datetime.timedelta(days=(7 - today.weekday()))
@@ -74,38 +73,27 @@ def next_week_dates():
         3: monday + datetime.timedelta(days=3)
     }
 
-async def get_training_messages(channel):
-    msgs = {}
-    async for msg in channel.history(limit=50):
+# ========= TRAINING HELPERS =========
+async def delete_old_training_posts(channel):
+    deleted = 0
+    async for msg in channel.history(limit=100):
         if msg.author == bot.user:
-            for wd, name in TRAINING_DAYS.items():
-                if name in msg.content:
-                    msgs[wd] = msg
-    return msgs
+            if any(str(r.emoji) in ["👍", "👎"] for r in msg.reactions):
+                await msg.delete()
+                deleted += 1
+    return deleted
 
-async def get_votes(msg):
-    voted = set()
-    for reaction in msg.reactions:
-        if str(reaction.emoji) in ["👍", "👎"]:
-            async for user in reaction.users():
-                if not user.bot:
-                    voted.add(user.id)
-    return voted
-
-async def create_training_posts():
-    ch = bot.get_channel(TRAINING_CHANNEL_ID)
-    role = discord.utils.get(ch.guild.roles, name=ROLE_NAME)
+async def post_training(channel):
+    deleted = await delete_old_training_posts(channel)
+    await send_log(f"🧹 {deleted} alte Trainingsposts gelöscht in #{channel.name}")
 
     for wd, date in next_week_dates().items():
-        msg = await ch.send(
+        msg = await channel.send(
             f"🏋️ **{TRAINING_DAYS[wd]}, {date.strftime('%d.%m.%Y')}**\n"
             "Reagiere mit 👍 oder 👎"
         )
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
-
-    await ch.send(role.mention)
-    await send_log("✅ Trainingsposts erstellt")
 
 # ========= EINZELGESPRÄCH =========
 async def create_einzel_channel(member):
@@ -135,9 +123,19 @@ async def create_einzel_channel(member):
     )
 
     await ch.send(
-        f"👋 Willkommen {member.mention}!\n\n"
-        "Dies ist dein persönlicher Einzelgespräch-Channel.\n"
-        "Hier erhältst du auch deine Erinnerungen."
+        f"Hallo {member.mention}\n\n"
+        "Vielen herzlichen Dank, dass du dich unserem Projekt angeschlossen hast und "
+        "auf lange und erfolgreiche Zeit mit uns zusammenarbeiten willst. "
+        "Dies ist dein eigener **Einzelgespräche-Channel**.\n\n"
+        "Hier hast du die Möglichkeit, immer vertraulich mit uns 3 VM's unter 8 Augen "
+        "zu sprechen, wenn du ein Anliegen hast. Ebenso werden wir dich hier kontaktieren, "
+        "falls wir einmal ein Anliegen haben.\n\n"
+        "Wichtig: Alles, was in diesem Channel geschrieben wird, bleibt auch hier. "
+        "Wir bitten dich, dies zu respektieren. Selbstverständlich erwarten wir einen "
+        "respektvollen und höflichen Umgangston – von deiner wie auch von unserer Seite.\n\n"
+        "Liebe Grüße\n"
+        "**Shinez, Flo & Birdie**\n"
+        "*aka dein VM-Team* 🍕"
     )
 
     await send_log(f"✅ Einzelgespräch erstellt für {member.name}")
@@ -161,65 +159,31 @@ async def on_member_update(before, after):
     if role in before.roles and role not in after.roles:
         await delete_einzel_channel(after)
 
-# ========= REMINDER =========
-async def remind_members(target=None):
-    ch = bot.get_channel(TRAINING_CHANNEL_ID)
-    role = discord.utils.get(ch.guild.roles, name=ROLE_NAME)
-    msgs = await get_training_messages(ch)
-
-    for m in ch.guild.members:
-        if m.bot or role not in m.roles:
-            continue
-        if target and m.id != target.id:
-            continue
-
-        missing = []
-        for wd, msg in msgs.items():
-            if m.id not in await get_votes(msg):
-                missing.append(TRAINING_DAYS[wd])
-
-        if missing:
-            eg = find_einzel_channel(ch.guild, m)
-            if eg:
-                text = (
-                    f"👋 Hallo {m.mention}!\n\n"
-                    "Bitte stimme hier für folgende Trainingstage ab:\n"
-                    f"👉 <#{TRAINING_CHANNEL_ID}>\n\n"
-                )
-                for d in missing:
-                    text += f"• {d}\n"
-                await eg.send(text)
-
 # ========= COMMANDS =========
-@bot.command()
-@commands.has_role(VM_ROLE_NAME)
-async def remind(ctx, member: discord.Member):
-    await remind_members(member)
-    await ctx.send(f"🔔 Erinnerung gesendet an {member.mention}")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def training(ctx):
-    await create_training_posts()
+    ch = bot.get_channel(TRAINING_CHANNEL_ID)
+    await post_training(ch)
     await ctx.send("✅ Trainingsposts erstellt")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def testtraining(ctx):
+    ch = bot.get_channel(TEST_TRAINING_CHANNEL_ID)
+    await post_training(ch)
+    await ctx.send("🧪 Test-Trainingsposts erstellt")
 
 # ========= TASKS =========
 @tasks.loop(minutes=1)
 async def friday_post():
     now = datetime.datetime.now(TIMEZONE)
     if now.weekday() == 4 and now.hour == 14 and now.minute == 0:
-        await create_training_posts()
-
-@tasks.loop(minutes=1)
-async def sunday_reminder():
-    now = datetime.datetime.now(TIMEZONE)
-    if now.weekday() == 6 and now.hour == 12 and now.minute == 0:
-        await remind_members()
+        await post_training(bot.get_channel(TRAINING_CHANNEL_ID))
 
 @bot.event
 async def on_ready():
     friday_post.start()
-    sunday_reminder.start()
     await send_log("🚀 Bot gestartet")
 
 bot.run(TOKEN)
