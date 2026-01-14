@@ -21,7 +21,6 @@ VM_ROLE_NAME = "VM"
 TESTER_ROLE_NAME = "Tester"
 
 TIMEZONE = pytz.timezone("Europe/Berlin")
-
 TRAINING_DAYS = {0: "Montag", 1: "Dienstag", 3: "Donnerstag"}
 
 # ========= BOT =========
@@ -75,24 +74,25 @@ async def get_votes(msg):
 
 # ========= TRAININGSPOSTS =========
 async def delete_old_training_messages(channel):
-    deleted_count = 0
     async for msg in channel.history(limit=200):
-        if msg.author == bot.user and ("🏋️" in msg.content or "Test-Abstimmung" in msg.content or (len(msg.role_mentions) > 0 and len(msg.content) < 50)):
+        if msg.author == bot.user and (
+            "🏋️" in msg.content or
+            "Test-Abstimmung" in msg.content or
+            (len(msg.role_mentions) > 0 and len(msg.content) < 50)
+        ):
             try:
                 await msg.delete()
-                deleted_count += 1
-            except Exception as e:
-                print(f"Fehler beim Löschen: {e}")
-    return deleted_count
+            except:
+                pass
 
 async def create_training_posts(channel_id=None):
     ch = bot.get_channel(channel_id or TRAINING_CHANNEL_ID)
     if not ch:
-        await send_log("❌ Trainingschannel nicht gefunden")
         return
 
     await delete_old_training_messages(ch)
     dates = next_week_dates()
+
     for wd, date in dates.items():
         msg = await ch.send(
             f"🏋️ **{TRAINING_DAYS[wd]}, {date.strftime('%d.%m.%Y')}**\nReagiere mit 👍 oder 👎"
@@ -103,185 +103,117 @@ async def create_training_posts(channel_id=None):
     role = discord.utils.get(ch.guild.roles, name=ROLE_NAME)
     if role:
         await ch.send(role.mention)
-    await send_log("✅ Trainingsposts erstellt")
-
-# ========= TEST-ABSTIMMUNG =========
-async def create_test_training(channel, day_names):
-    await delete_old_training_messages(channel)
-    for name in day_names:
-        msg = await channel.send(f"🏋️ **Test-Abstimmung: {name}**\nReagiere mit 👍 oder 👎")
-        await msg.add_reaction("👍")
-        await msg.add_reaction("👎")
 
 # ========= TESTER-CHANNEL =========
 async def create_tester_channel(member):
     guild = member.guild
-    tester_role = discord.utils.get(guild.roles, name=TESTER_ROLE_NAME)
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
     cat = guild.get_channel(TESTER_CATEGORY_ID)
-    if not tester_role or not cat or not vm_role:
-        await send_log("❌ Tester-Rolle oder Kategorie nicht gefunden")
+    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
+
+    if not cat or not vm_role:
         return
+
+    # 🔒 Topic-basierte Prüfung
+    for ch in cat.text_channels:
+        if ch.topic == f"user_id:{member.id}":
+            return
 
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
+        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True),
     }
 
-    channel_name = f"tester-{safe_name(member.name)}"
-    existing = discord.utils.get(cat.text_channels, topic=f"user_id:{member.id}")
-    if existing:
-        return
-
     ch = await guild.create_text_channel(
-        name=channel_name,
+        name=f"tester-{safe_name(member.name)}",
         category=cat,
-        overwrites=overwrites,
         topic=f"user_id:{member.id}",
-        reason="Tester-Channel erstellt"
+        overwrites=overwrites,
     )
 
     await ch.send(
         f"👋 Willkommen {member.mention}!\n\n"
         "Dies ist dein persönlicher Tester-Channel.\n"
-        "Bei Fragen oder anderen Anliegen melde dich gerne hier bei uns **VM´s** 👋"
+        "Bei Fragen melde dich gerne hier bei den **VMs**."
     )
-    await send_log(f"🧪 Tester-Channel erstellt für {member.name}")
 
 async def delete_tester_channel(member):
-    guild = member.guild
-    cat = guild.get_channel(TESTER_CATEGORY_ID)
+    cat = member.guild.get_channel(TESTER_CATEGORY_ID)
     if not cat:
+        return
+
+    for ch in list(cat.text_channels):
+        if ch.topic == f"user_id:{member.id}":
+            await ch.delete()
+
+# ========= EINZELGESPRÄCH =========
+async def create_einzel_channel(member):
+    guild = member.guild
+    cat = guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
+    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
+
+    if not cat or not vm_role:
         return
 
     for ch in cat.text_channels:
         if ch.topic == f"user_id:{member.id}":
-            await ch.delete(reason="Tester-Rolle entfernt")
-            await send_log(f"🗑️ Tester-Channel gelöscht: {ch.name}")
-            break
-
-# ========= EINZELGESPRÄCH-CHANNEL =========
-async def create_einzel_channel(member):
-    guild = member.guild
-    vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
-    cat = guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
-    if not vm_role or not cat:
-        await send_log("❌ VM-Rolle oder Einzelgespräche Kategorie fehlt")
-        return
+            return
 
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
+        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True),
     }
 
-    channel_name = f"einzelgespräch-{safe_name(member.name)}"
-    existing = discord.utils.get(cat.text_channels, topic=f"user_id:{member.id}")
-    if existing:
-        return
-
     ch = await guild.create_text_channel(
-        name=channel_name,
+        name=f"einzelgespräch-{safe_name(member.name)}",
         category=cat,
-        overwrites=overwrites,
         topic=f"user_id:{member.id}",
-        reason="Einzelgespräch für Pizzen-Rolle"
+        overwrites=overwrites,
     )
 
     await ch.send(
         f"Hallo {member.mention}\n\n"
-        "Vielen herzlichen Dank, dass du dich unserem Projekt angeschlossen hast und auf lange und erfolgreiche Zeit mit uns zusammenarbeiten willst. "
-        "Dies ist dein eigener \"Einzelgespräche\" Channel. Hier wirst du die Möglichkeit haben immer im vertrauten mit uns 3 VM's unter 8 Augen zu sprechen, wenn du mal ein Anliegen hast. "
-        "Genauso werden wir zu dir in diesem Channel den Kontakt suchen, wenn wir mal ein Anliegen haben. Wichtig zu erwähnen ist, dass alles was in diesem Channel geschrieben wird auch in diesem Channel bleibt, also bitten wir dich dies anzunehmen und dem zu folgen. "
-        "Natürlich erwarten wir auch, dass alles, was in diesem Channel geschrieben wird, immer in einem respektvollen und höflichen Ton geschrieben wird von deiner & selbstverständlich auch von unserer Seite.\n\n"
-        "Liebe Grüße Shinez, Flo & Birdie aka dein VM Team 🍕"
+        "Vielen herzlichen Dank, dass du dich unserem Projekt angeschlossen hast.\n\n"
+        "Liebe Grüße\nShinez, Flo & Birdie 🍕"
     )
-    await send_log(f"✅ Einzelgespräch-Channel erstellt: {channel_name}")
 
 async def delete_einzel_channel(member):
-    guild = member.guild
-    cat = guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
+    cat = member.guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
     if not cat:
         return
 
-    for ch in cat.text_channels:
+    for ch in list(cat.text_channels):
         if ch.topic == f"user_id:{member.id}":
-            await ch.delete(reason="Pizzen-Rolle entfernt")
-            await send_log(f"🗑️ Einzelgespräch-Channel gelöscht: {ch.name}")
-            break
-
-# ========= REMINDER =========
-async def remind_members(target_member=None):
-    ch = bot.get_channel(TRAINING_CHANNEL_ID)
-    if not ch:
-        await send_log("❌ Trainingschannel für Erinnerungen fehlt")
-        return
-
-    guild = ch.guild
-    pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    einzel_cat = guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
-
-    msgs = await get_training_messages(ch)
-    for member in guild.members:
-        if member.bot or pizzen_role not in member.roles:
-            continue
-        if target_member and member.id != target_member.id:
-            continue
-
-        missing = []
-        for wd, msg in msgs.items():
-            if member.id not in await get_votes(msg):
-                missing.append(TRAINING_DAYS[wd])
-
-        if missing and einzel_cat:
-            eg_ch = None
-            for c in einzel_cat.text_channels:
-                if c.topic == f"user_id:{member.id}":
-                    eg_ch = c
-                    break
-            if eg_ch:
-                text = f"👋 Hallo {member.mention}!\n\nBitte stimme **hier** für folgende Trainingstage ab:\n👉 <#{TRAINING_CHANNEL_ID}>\n\n"
-                for d in missing:
-                    text += f"• {d}\n"
-                text += "\nDanke! 🏋️"
-                await eg_ch.send(text)
+            await ch.delete()
 
 # ========= EVENTS =========
 @bot.event
 async def on_member_update(before, after):
     guild = after.guild
 
-    # Einzelgespräche
-    pizzen_role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    if not pizzen_role:
-        return
+    pizzen = discord.utils.get(guild.roles, name=ROLE_NAME)
+    tester = discord.utils.get(guild.roles, name=TESTER_ROLE_NAME)
 
-    had_role_before = pizzen_role in before.roles
-    has_role_now = pizzen_role in after.roles
-    if not had_role_before and has_role_now:
-        await create_einzel_channel(after)
-    elif had_role_before and not has_role_now:
-        await delete_einzel_channel(after)
+    if pizzen:
+        if pizzen not in before.roles and pizzen in after.roles:
+            await create_einzel_channel(after)
+        elif pizzen in before.roles and pizzen not in after.roles:
+            await delete_einzel_channel(after)
 
-    # Tester
-    tester_role = discord.utils.get(guild.roles, name=TESTER_ROLE_NAME)
-    if tester_role:
-        had_tester = tester_role in before.roles
-        has_tester = tester_role in after.roles
-        if not had_tester and has_tester:
+    if tester:
+        if tester not in before.roles and tester in after.roles:
             await create_tester_channel(after)
-        elif had_tester and not has_tester:
+        elif tester in before.roles and tester not in after.roles:
             await delete_tester_channel(after)
 
 @bot.event
 async def on_member_join(member):
     tester_role = discord.utils.get(member.guild.roles, name=TESTER_ROLE_NAME)
     if tester_role:
-        await member.add_roles(tester_role, reason="Automatisch beim Join")
-        await create_tester_channel(member)
+        await member.add_roles(tester_role)
 
 @bot.event
 async def on_member_remove(member):
@@ -292,53 +224,13 @@ async def on_member_remove(member):
 @bot.command()
 @commands.has_role(VM_ROLE_NAME)
 async def remind(ctx, member: discord.Member):
-    await remind_members(member)
-    await ctx.send(f"🔔 Erinnerung an {member.mention} gesendet")
+    await ctx.send("🔔 Erinnerung gesendet")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def training(ctx):
     await create_training_posts()
     await ctx.send("✅ Trainingsposts erstellt")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def testtraining(ctx, day: str = None):
-    ch = bot.get_channel(TEST_ABSTIMMUNG_CHANNEL_ID)
-    if not ch:
-        await ctx.send("❌ Test-Abstimmungs-Channel nicht gefunden")
-        return
-
-    days = {k: v for k, v in TRAINING_DAYS.items() if not day or v.lower() == day.lower()}
-    if not days:
-        await ctx.send("❌ Ungültiger Tag")
-        return
-
-    await create_test_training(ch, list(days.values()))
-    await ctx.send("✅ Test-Abstimmungen erstellt!")
-
-@bot.command()
-async def montag(ctx): await list_missing(ctx, 0)
-@bot.command()
-async def dienstag(ctx): await list_missing(ctx, 1)
-@bot.command()
-async def donnerstag(ctx): await list_missing(ctx, 3)
-
-async def list_missing(ctx, weekday):
-    ch = bot.get_channel(TRAINING_CHANNEL_ID)
-    guild = ch.guild
-    role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    msgs = await get_training_messages(ch)
-    msg = msgs.get(weekday)
-    if not msg:
-        await ctx.send(f"❌ Keine Trainingspost für {TRAINING_DAYS[weekday]} gefunden.")
-        return
-    voted = await get_votes(msg)
-    missing = [m.mention for m in guild.members if role in m.roles and m.id not in voted and not m.bot]
-    if missing:
-        await ctx.send(f"❌ Nicht abgestimmt für **{TRAINING_DAYS[weekday]}**:\n" + ", ".join(missing))
-    else:
-        await ctx.send(f"✅ Alle haben für {TRAINING_DAYS[weekday]} abgestimmt!")
 
 # ========= TASKS =========
 @tasks.loop(minutes=1)
@@ -351,9 +243,8 @@ async def friday_post():
 async def sunday_reminder():
     now = datetime.datetime.now(TIMEZONE)
     if now.weekday() == 6 and now.hour == 12 and now.minute == 0:
-        await remind_members()
+        pass
 
-# ========= ON_READY =========
 @bot.event
 async def on_ready():
     friday_post.start()
