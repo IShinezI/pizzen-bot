@@ -46,7 +46,8 @@ async def send_log(text):
 
 def safe_name(name: str):
     name = name.lower()
-    name = re.sub(r"[^a-z0-9\-äöü]", "-", name)
+    name = name.replace("ae", "ä")
+    name = re.sub(r"[^a-z0-9äöü\-]", "-", name)
     return name[:90]
 
 def next_week_dates():
@@ -72,14 +73,10 @@ async def get_votes(msg):
                     voted.add(user.id)
     return voted
 
-# ========= TRAININGSPOSTS =========
+# ========= TRAINING =========
 async def delete_old_training_messages(channel):
     async for msg in channel.history(limit=200):
-        if msg.author == bot.user and (
-            "🏋️" in msg.content or
-            "Test-Abstimmung" in msg.content or
-            (len(msg.role_mentions) > 0 and len(msg.content) < 50)
-        ):
+        if msg.author == bot.user:
             try:
                 await msg.delete()
             except:
@@ -104,7 +101,7 @@ async def create_training_posts(channel_id=None):
     if role:
         await ch.send(role.mention)
 
-# ========= TESTER-CHANNEL =========
+# ========= TESTER CHANNEL =========
 async def create_tester_channel(member):
     guild = member.guild
     cat = guild.get_channel(TESTER_CATEGORY_ID)
@@ -113,7 +110,7 @@ async def create_tester_channel(member):
     if not cat or not vm_role:
         return
 
-    # 🔒 Topic-basierte Prüfung
+    # ❗ WICHTIGER FIX: manuelles Finden
     for ch in cat.text_channels:
         if ch.topic == f"user_id:{member.id}":
             return
@@ -128,24 +125,29 @@ async def create_tester_channel(member):
     ch = await guild.create_text_channel(
         name=f"tester-{safe_name(member.name)}",
         category=cat,
-        topic=f"user_id:{member.id}",
         overwrites=overwrites,
+        topic=f"user_id:{member.id}",
     )
 
     await ch.send(
         f"👋 Willkommen {member.mention}!\n\n"
         "Dies ist dein persönlicher Tester-Channel.\n"
-        "Bei Fragen melde dich gerne hier bei den **VMs**."
+        "Bei Fragen melde dich gerne bei den **VMs**."
     )
 
+    await send_log(f"🧪 Tester-Channel erstellt für {member.name}")
+
 async def delete_tester_channel(member):
-    cat = member.guild.get_channel(TESTER_CATEGORY_ID)
+    guild = member.guild
+    cat = guild.get_channel(TESTER_CATEGORY_ID)
     if not cat:
         return
 
-    for ch in list(cat.text_channels):
+    for ch in cat.text_channels:
         if ch.topic == f"user_id:{member.id}":
             await ch.delete()
+            await send_log(f"🗑️ Tester-Channel gelöscht: {ch.name}")
+            break
 
 # ========= EINZELGESPRÄCH =========
 async def create_einzel_channel(member):
@@ -170,24 +172,25 @@ async def create_einzel_channel(member):
     ch = await guild.create_text_channel(
         name=f"einzelgespräch-{safe_name(member.name)}",
         category=cat,
-        topic=f"user_id:{member.id}",
         overwrites=overwrites,
+        topic=f"user_id:{member.id}",
     )
 
     await ch.send(
         f"Hallo {member.mention}\n\n"
-        "Vielen herzlichen Dank, dass du dich unserem Projekt angeschlossen hast.\n\n"
-        "Liebe Grüße\nShinez, Flo & Birdie 🍕"
+        "Dies ist dein persönlicher Einzelgespräch-Channel."
     )
 
 async def delete_einzel_channel(member):
-    cat = member.guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
+    guild = member.guild
+    cat = guild.get_channel(EINZELGESPRÄCHE_CATEGORY_ID)
     if not cat:
         return
 
-    for ch in list(cat.text_channels):
+    for ch in cat.text_channels:
         if ch.topic == f"user_id:{member.id}":
             await ch.delete()
+            break
 
 # ========= EVENTS =========
 @bot.event
@@ -211,9 +214,10 @@ async def on_member_update(before, after):
 
 @bot.event
 async def on_member_join(member):
-    tester_role = discord.utils.get(member.guild.roles, name=TESTER_ROLE_NAME)
-    if tester_role:
-        await member.add_roles(tester_role)
+    tester = discord.utils.get(member.guild.roles, name=TESTER_ROLE_NAME)
+    if tester:
+        await member.add_roles(tester)
+        await create_tester_channel(member)
 
 @bot.event
 async def on_member_remove(member):
@@ -222,15 +226,22 @@ async def on_member_remove(member):
 
 # ========= COMMANDS =========
 @bot.command()
-@commands.has_role(VM_ROLE_NAME)
-async def remind(ctx, member: discord.Member):
-    await ctx.send("🔔 Erinnerung gesendet")
-
-@bot.command()
 @commands.has_permissions(administrator=True)
 async def training(ctx):
     await create_training_posts()
     await ctx.send("✅ Trainingsposts erstellt")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def testtraining(ctx):
+    ch = bot.get_channel(TEST_ABSTIMMUNG_CHANNEL_ID)
+    if not ch:
+        return
+    await delete_old_training_messages(ch)
+    for d in TRAINING_DAYS.values():
+        msg = await ch.send(f"🏋️ **Test-Abstimmung: {d}**")
+        await msg.add_reaction("👍")
+        await msg.add_reaction("👎")
 
 # ========= TASKS =========
 @tasks.loop(minutes=1)
@@ -239,16 +250,9 @@ async def friday_post():
     if now.weekday() == 4 and now.hour == 14 and now.minute == 0:
         await create_training_posts()
 
-@tasks.loop(minutes=1)
-async def sunday_reminder():
-    now = datetime.datetime.now(TIMEZONE)
-    if now.weekday() == 6 and now.hour == 12 and now.minute == 0:
-        pass
-
 @bot.event
 async def on_ready():
     friday_post.start()
-    sunday_reminder.start()
     await send_log("✅ Bot gestartet")
 
 bot.run(TOKEN)
