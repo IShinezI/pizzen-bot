@@ -1,4 +1,4 @@
-import discord
+import discord 
 from discord.ext import tasks, commands
 import datetime
 from threading import Thread
@@ -6,6 +6,7 @@ from flask import Flask
 import os
 import pytz
 import re
+import asyncio  # <-- NEU (nur für Tester-Channel Lock)
 
 # ========= CONFIG =========
 TOKEN = os.environ["TOKEN"]
@@ -128,6 +129,16 @@ async def create_test_training(channel, day_names):
         await msg.add_reaction("👎")
 
 # ========= TESTER-CHANNEL =========
+# NEU: Lock pro User, verhindert doppelte Erstellung (Race Condition)
+_tester_channel_locks = {}
+
+def _get_tester_lock(user_id: int) -> asyncio.Lock:
+    lock = _tester_channel_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _tester_channel_locks[user_id] = lock
+    return lock
+
 async def create_tester_channel(member):
     guild = member.guild
     vm_role = discord.utils.get(guild.roles, name=VM_ROLE_NAME)
@@ -135,46 +146,47 @@ async def create_tester_channel(member):
     if not cat or not vm_role:
         return
 
-    existing = discord.utils.get(
-        cat.text_channels,
-        topic=f"user_id:{member.id}"
-    )
-    if existing:
-        return
+    # ✅ FIX: verhindern, dass zwei parallele Events zwei Channels erstellen
+    lock = _get_tester_lock(member.id)
+    async with lock:
+        # ✅ FIX: sichere Topic-Suche (nicht utils.get(topic=...))
+        for ch in cat.text_channels:
+            if ch.topic == f"user_id:{member.id}":
+                return
 
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
-    }
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            member: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            vm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)
+        }
 
-    ch = await guild.create_text_channel(
-        name=f"tester-{safe_name(member.name)}",
-        category=cat,
-        overwrites=overwrites,
-        topic=f"user_id:{member.id}",
-        reason="Tester-Channel erstellt"
-    )
+        ch = await guild.create_text_channel(
+            name=f"tester-{safe_name(member.name)}",
+            category=cat,
+            overwrites=overwrites,
+            topic=f"user_id:{member.id}",
+            reason="Tester-Channel erstellt"
+        )
 
-    await ch.send(
-        f"👋 Willkommen {member.mention}!\n\n"
-        "Dies ist dein persönlicher Tester-Channel.\n"
-        "Bei Fragen oder anderen Anliegen melde dich gerne hier bei uns **VM´s** 👋"
-    )
+        await ch.send(
+            f"👋 Willkommen {member.mention}!\n\n"
+            "Dies ist dein persönlicher Tester-Channel.\n"
+            "Bei Fragen oder anderen Anliegen melde dich gerne hier bei uns **VM´s** 👋"
+        )
 
-    await send_log(f"🧪 Tester-Channel erstellt für {member.name}")
+        await send_log(f"🧪 Tester-Channel erstellt für {member.name}")
 
 async def delete_tester_channel(member):
     cat = member.guild.get_channel(TESTER_CATEGORY_ID)
     if not cat:
         return
 
-    for ch in cat.text_channels:
+    # ✅ FIX: wenn aus Versehen mehrere existieren, alle löschen
+    for ch in list(cat.text_channels):
         if ch.topic == f"user_id:{member.id}":
-            await ch.delete(reason="Tester-Rolle entfernt")
+            await ch.delete(reason="Tester-Rolle entfernt / Member left")
             await send_log(f"🗑️ Tester-Channel gelöscht: {ch.name}")
-            break
 
 # ========= EINZELGESPRÄCH =========
 async def create_einzel_channel(member):
@@ -278,6 +290,7 @@ async def on_member_update(before, after):
         elif pizzen_role in before.roles and pizzen_role not in after.roles:
             await delete_einzel_channel(after)
 
+    # ✅ Tester jetzt wie Einzelgespräche: bei Rolle geben -> öffnen, bei Rolle weg -> schließen
     if tester_role:
         if tester_role not in before.roles and tester_role in after.roles:
             await create_tester_channel(after)
@@ -289,7 +302,7 @@ async def on_member_join(member):
     tester_role = discord.utils.get(member.guild.roles, name=TESTER_ROLE_NAME)
     if tester_role:
         await member.add_roles(tester_role, reason="Automatisch beim Join")
-        # FIX: KEIN create_tester_channel HIER → verhindert doppelte Channels
+        # bleibt so: Channel kommt durch on_member_update (wie Einzelgespräche)
 
 @bot.event
 async def on_member_remove(member):
