@@ -9,7 +9,9 @@ import re
 import asyncio
 
 # ========= CONFIG =========
-TOKEN = os.environ["TOKEN"]
+TOKEN = os.environ.get("TOKEN")
+if not TOKEN:
+    raise RuntimeError("TOKEN fehlt in Render Environment Variables")
 
 TRAINING_CHANNEL_ID = 1434580297206202482
 LOG_CHANNEL_ID = 1434579615153913946
