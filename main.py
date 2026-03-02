@@ -51,6 +51,9 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ========= HILFSFUNKTIONEN =========
+import sys
+print("PYTHON VERSION:", sys.version)
+
 async def send_log(text):
     ch = bot.get_channel(LOG_CHANNEL_ID)
     if ch:
