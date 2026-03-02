@@ -36,13 +36,18 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ========= FLASK =========
+# ========= FLASK =========
 app = Flask("")
 
 @app.route("/")
 def home():
     return "Bot läuft"
 
-Thread(target=lambda: app.run("0.0.0.0", 5000), daemon=True).start()
+def run_web():
+    port = int(os.environ.get("PORT", "5000"))  # Render setzt PORT automatisch
+    app.run(host="0.0.0.0", port=port)
+
+Thread(target=run_web, daemon=True).start()
 
 # ========= HILFSFUNKTIONEN =========
 async def send_log(text):
