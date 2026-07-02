@@ -233,7 +233,7 @@ async def create_einzel_channel(member):
         "Dies ist dein eigener \"Einzelgespräche\" Channel. Hier wirst du die Möglichkeit haben immer im vertrauten mit uns 3 VM's unter 8 Augen zu sprechen, wenn du mal ein Anliegen hast. "
         "Genauso werden wir zu dir in diesem Channel den Kontakt suchen, wenn wir mal ein Anliegen haben. Wichtig zu erwähnen ist, dass alles was in diesem Channel geschrieben wird auch in diesem Channel bleibt, also bitten wir dich dies anzunehmen und dem zu folgen. "
         "Natürlich erwarten wir auch, dass alles, was in diesem Channel geschrieben wird, immer in einem respektvollen und höflichen Ton geschrieben wird von deiner & selbstverständlich auch von unserer Seite.\n\n"
-        "Liebe Grüße Shinez, Flo & Birdie aka dein VM Team 🍕"
+        "Liebe Grüße Mirko, Flo & Birdie aka dein VM Team 🍕"
     )
 
     await send_log(f"✅ Einzelgespräch-Channel erstellt: {ch.name}")
