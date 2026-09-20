@@ -29,7 +29,8 @@ TIMEZONE = pytz.timezone("Europe/Berlin")
 TRAINING_DAYS = {
     0: "Montag",
     1: "Dienstag",
-    3: "Donnerstag"
+    3: "Donnerstag",
+    6: "Sonntag"
 }
 
 # ========= BOT =========
@@ -69,10 +70,12 @@ def safe_name(name: str):
 def next_week_dates():
     today = datetime.date.today()
     monday = today + datetime.timedelta(days=(7 - today.weekday()))
+
     return {
         0: monday,
         1: monday + datetime.timedelta(days=1),
-        3: monday + datetime.timedelta(days=3)
+        3: monday + datetime.timedelta(days=3),
+        6: monday + datetime.timedelta(days=6)
     }
 
 async def get_training_messages(channel):
