@@ -372,6 +372,10 @@ async def dienstag(ctx):
 async def donnerstag(ctx):
     await list_missing(ctx, 3)
 
+@bot.command()
+async def sonntag(ctx):
+    await list_missing(ctx, 6)
+
 async def list_missing(ctx, weekday):
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
 
