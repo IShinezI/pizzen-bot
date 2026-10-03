@@ -30,7 +30,6 @@ TRAINING_DAYS = {
     0: "Montag",
     1: "Dienstag",
     3: "Donnerstag",
-    6: "Sonntag"
 }
 
 # ========= BOT =========
@@ -74,18 +73,59 @@ def next_week_dates():
     return {
         0: monday,
         1: monday + datetime.timedelta(days=1),
-        3: monday + datetime.timedelta(days=3),
-        6: monday + datetime.timedelta(days=6)
+        3: monday + datetime.timedelta(days=3)
     }
 
 async def get_training_messages(channel):
     msgs = {}
+
     async for msg in channel.history(limit=200):
-        if msg.author == bot.user:
-            for wd, name in TRAINING_DAYS.items():
-                if name in msg.content:
-                    msgs[wd] = msg
+        if msg.author != bot.user:
+            continue
+
+        for wd, name in TRAINING_DAYS.items():
+            if name in msg.content:
+                msgs[wd] = msg
+
+        # Sonntags-Abstimmung separat erkennen
+        if "Sonntag" in msg.content:
+            msgs[6] = msg
+
     return msgs
+
+async def create_sunday_post():
+    ch = bot.get_channel(TRAINING_CHANNEL_ID)
+
+    if not ch:
+        return
+
+    # Alten Sonntags-Post löschen
+    async for msg in ch.history(limit=200):
+        if (
+            msg.author == bot.user
+            and "Sonntag" in msg.content
+            and "🏋️" in msg.content
+        ):
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    today = datetime.date.today()
+
+    next_sunday = today + datetime.timedelta(
+        days=(6 - today.weekday()) % 7 + 7
+    )
+
+    msg = await ch.send(
+        f"🏋️ **Sonntag, {next_sunday.strftime('%d.%m.%Y')}**\n"
+        "Reagiere mit 👍 oder 👎"
+    )
+
+    await msg.add_reaction("👍")
+    await msg.add_reaction("👎")
+
+    await send_log("✅ Sonntags-Abstimmung erstellt")
 
 async def get_votes(msg):
     voted = set()
@@ -99,10 +139,10 @@ async def get_votes(msg):
 # ========= TRAININGSPOSTS =========
 async def delete_old_training_messages(channel):
     async for msg in channel.history(limit=200):
-        if msg.author == bot.user and (
-            "🏋️" in msg.content
-            or "Test-Abstimmung" in msg.content
-            or (len(msg.role_mentions) > 0 and len(msg.content) < 50)
+        if (
+            msg.author == bot.user
+            and "🏋️" in msg.content
+            and "Sonntag" not in msg.content
         ):
             try:
                 await msg.delete()
@@ -111,11 +151,14 @@ async def delete_old_training_messages(channel):
 
 async def create_training_posts(channel_id=None):
     ch = bot.get_channel(channel_id or TRAINING_CHANNEL_ID)
+
     if not ch:
         await send_log("❌ Trainingschannel nicht gefunden")
         return
 
+    # Alte Montag-/Dienstag-/Donnerstag-Posts löschen
     await delete_old_training_messages(ch)
+
     dates = next_week_dates()
 
     for wd, date in dates.items():
@@ -123,15 +166,19 @@ async def create_training_posts(channel_id=None):
             f"🏋️ **{TRAINING_DAYS[wd]}, {date.strftime('%d.%m.%Y')}**\n"
             "Reagiere mit 👍 oder 👎"
         )
+
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
 
     role = discord.utils.get(ch.guild.roles, name=ROLE_NAME)
+
     if role:
         await ch.send(role.mention)
 
-    await send_log("✅ Trainingsposts erstellt")
+    await create_sunday_post()
 
+    await send_log("✅ Trainingsposts erstellt")
+                
 # ========= TEST-ABSTIMMUNG =========
 async def create_test_training(channel, day_names):
     await delete_old_training_messages(channel)
@@ -252,8 +299,10 @@ async def delete_einzel_channel(member):
             await send_log(f"🗑️ Einzelgespräch-Channel gelöscht: {ch.name}")
 
 # ========= REMINDER =========
+# ========= REMINDER =========
 async def remind_members(target_member=None):
     ch = bot.get_channel(TRAINING_CHANNEL_ID)
+
     if not ch:
         return
 
@@ -277,7 +326,10 @@ async def remind_members(target_member=None):
 
         for wd, msg in msgs.items():
             if member.id not in await get_votes(msg):
-                missing.append(TRAINING_DAYS[wd])
+                if wd == 6:
+                    missing.append("Sonntag")
+                else:
+                    missing.append(TRAINING_DAYS[wd])
 
         if missing:
             for c in einzel_cat.text_channels:
@@ -293,7 +345,6 @@ async def remind_members(target_member=None):
 
                     text += "\nDanke! 🏋️"
                     await c.send(text)
-
 # ========= EVENTS =========
 @bot.event
 async def on_member_update(before, after):
@@ -329,9 +380,13 @@ async def on_member_remove(member):
 # ========= COMMANDS =========
 @bot.command()
 @commands.has_role(VM_ROLE_NAME)
-async def remind(ctx, member: discord.Member):
+async def remind(ctx, member: discord.Member = None):
     await remind_members(member)
-    await ctx.send(f"🔔 Erinnerung an {member.mention} gesendet")
+
+    if member:
+        await ctx.send(f"🔔 Erinnerung an {member.mention} gesendet")
+    else:
+        await ctx.send("🔔 Erinnerungen an alle offenen Mitglieder gesendet")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -348,8 +403,13 @@ async def testtraining(ctx, day: str = None):
         await ctx.send("❌ Test-Abstimmungs-Channel nicht gefunden")
         return
 
+    all_days = {
+        **TRAINING_DAYS,
+        6: "Sonntag"
+    }
+
     days = {
-        k: v for k, v in TRAINING_DAYS.items()
+        k: v for k, v in all_days.items()
         if not day or v.lower() == day.lower()
     }
 
@@ -385,27 +445,33 @@ async def list_missing(ctx, weekday):
 
     guild = ch.guild
     role = discord.utils.get(guild.roles, name=ROLE_NAME)
+
     msgs = await get_training_messages(ch)
     msg = msgs.get(weekday)
 
+    day_name = "Sonntag" if weekday == 6 else TRAINING_DAYS[weekday]
+
     if not msg:
-        await ctx.send(f"❌ Keine Trainingspost für {TRAINING_DAYS[weekday]} gefunden.")
+        await ctx.send(f"❌ Keine Trainingspost für {day_name} gefunden.")
         return
 
     voted = await get_votes(msg)
 
     missing = [
-        m.mention for m in guild.members
+        m.mention
+        for m in guild.members
         if role in m.roles and m.id not in voted and not m.bot
     ]
 
     if missing:
         await ctx.send(
-            f"❌ Nicht abgestimmt für **{TRAINING_DAYS[weekday]}**:\n"
+            f"❌ Nicht abgestimmt für **{day_name}**:\n"
             + ", ".join(missing)
         )
     else:
-        await ctx.send(f"✅ Alle haben für {TRAINING_DAYS[weekday]} abgestimmt!")
+        await ctx.send(
+            f"✅ Alle haben für {day_name} abgestimmt!"
+        )
 
 # ========= TASKS =========
 @tasks.loop(minutes=1)
@@ -422,6 +488,17 @@ async def sunday_reminder():
     if now.weekday() == 6 and now.hour == 12 and now.minute == 0:
         await remind_members()
 
+@tasks.loop(minutes=1)
+async def sunday_post():
+    now = datetime.datetime.now(TIMEZONE)
+
+    if (
+        now.weekday() == 6
+        and now.hour == 20
+        and now.minute == 15
+    ):
+        await create_sunday_post()
+
 # ========= ON_READY =========
 @bot.event
 async def on_ready():
@@ -430,6 +507,9 @@ async def on_ready():
 
     if not sunday_reminder.is_running():
         sunday_reminder.start()
+
+    if not sunday_post.is_running():
+        sunday_post.start()
 
     await send_log("✅ Bot gestartet")
 
