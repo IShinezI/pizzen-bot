@@ -175,7 +175,6 @@ async def create_training_posts(channel_id=None):
     if role:
         await ch.send(role.mention)
 
-    await create_sunday_post()
 
     await send_log("✅ Trainingsposts erstellt")
                 
