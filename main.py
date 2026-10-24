@@ -137,17 +137,29 @@ async def get_votes(msg):
     return voted
 
 # ========= TRAININGSPOSTS =========
+
 async def delete_old_training_messages(channel):
     async for msg in channel.history(limit=200):
+        if msg.author != bot.user:
+            continue
+
+        # Sonntags-Abstimmung niemals hier löschen
+        if "🏋️" in msg.content and "Sonntag" in msg.content:
+            continue
+
+        # Nur reguläre Trainingsposts löschen
         if (
-            msg.author == bot.user
-            and "🏋️" in msg.content
-            and "Sonntag" not in msg.content
+            "🏋️" in msg.content
+            and any(
+                f"**{day}," in msg.content
+                for day in TRAINING_DAYS.values()
+            )
         ):
             try:
                 await msg.delete()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Fehler beim Löschen von Trainingspost: {e}")
+
 
 async def create_training_posts(channel_id=None):
     ch = bot.get_channel(channel_id or TRAINING_CHANNEL_ID)
